@@ -16,32 +16,48 @@ public class MainForm : Form
     private Button stopButton;
     private TPCANHandle selectedCanHandle;
     private CancellationTokenSource cancellationTokenSource;
-    private readonly object lockObj = new object();
 
     public MainForm()
     {
         InitializeComponents();
         LoadAvailableDevices();
         LoadBaudrates();
-        AdjustComponentWidths();
     }
 
     private void InitializeComponents()
     {
-        this.deviceComboBox = new ComboBox { Left = 10, Top = 10 };
-        this.baudrateComboBox = new ComboBox { Left = 10, Top = 40 };
-        this.startButton = new Button { Text = "Start", Left = 320, Top = 10 };
-        this.stopButton = new Button { Text = "Stop", Left = 320, Top = 40 };
+        this.deviceComboBox = new ComboBox { Dock = DockStyle.Fill };
+        this.baudrateComboBox = new ComboBox { Dock = DockStyle.Fill };
+        this.startButton = new Button { Text = "Start", Dock = DockStyle.Fill };
+        this.stopButton = new Button { Text = "Stop", Dock = DockStyle.Fill };
         this.startButton.Click += StartButton_Click;
         this.stopButton.Click += StopButton_Click;
 
-        this.Controls.Add(this.deviceComboBox);
-        this.Controls.Add(this.baudrateComboBox);
-        this.Controls.Add(this.startButton);
-        this.Controls.Add(this.stopButton);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 2,
+            AutoSize = true
+        };
+
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+
+        layout.Controls.Add(deviceComboBox, 0, 0);
+        layout.SetColumnSpan(deviceComboBox, 3);
+        layout.Controls.Add(baudrateComboBox, 0, 1);
+        layout.Controls.Add(startButton, 1, 1);
+        layout.Controls.Add(stopButton, 2, 1);
+
+        this.Controls.Add(layout);
 
         this.Text = "PCAN USB Selector";
         this.ClientSize = new System.Drawing.Size(450, 80);
+        this.MinimumSize = new System.Drawing.Size(470, 120);  // 设置窗体的最小尺寸
     }
 
     private void LoadAvailableDevices()
@@ -188,37 +204,6 @@ public class MainForm : Form
         return PCANBasic.PCAN_USBBUS1; // Default for example purposes
     }
 
-    private void AdjustComponentWidths()
-    {
-        using (Graphics g = this.CreateGraphics())
-        {
-            int maxWidth = 0;
-            foreach (var item in deviceComboBox.Items)
-            {
-                int itemWidth = (int)g.MeasureString(item.ToString(), deviceComboBox.Font).Width;
-                if (itemWidth > maxWidth)
-                {
-                    maxWidth = itemWidth;
-                }
-            }
-            deviceComboBox.Width = maxWidth + 20; // Adding some padding
-
-            maxWidth = 0;
-            foreach (var item in baudrateComboBox.Items)
-            {
-                int itemWidth = (int)g.MeasureString(item.ToString(), baudrateComboBox.Font).Width;
-                if (itemWidth > maxWidth)
-                {
-                    maxWidth = itemWidth;
-                }
-            }
-            baudrateComboBox.Width = maxWidth + 20; // Adding some padding
-
-            startButton.Left = deviceComboBox.Width + 20;
-            stopButton.Left = baudrateComboBox.Width + 20;
-        }
-    }
-
     [STAThread]
     public static void Main()
     {
@@ -265,11 +250,12 @@ public class DeviceForm : Form
 
     private void InitializeComponents()
     {
-        this.messageListBox = new ListBox { Left = 10, Top = 10, Width = 460, Height = 240 };
+        this.messageListBox = new ListBox { Left = 10, Top = 10, Width = 460, Height = 240, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Bottom | AnchorStyles.Right };
         this.Controls.Add(this.messageListBox);
 
         this.Text = $"PCAN Device {canHandle} Messages";
         this.ClientSize = new System.Drawing.Size(480, 260);
+        this.MinimumSize = new System.Drawing.Size(500, 300);  // 设置窗体的最小尺寸
     }
 
     public void DisplayMessage(TPCANMsg msg)
