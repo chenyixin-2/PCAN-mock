@@ -311,11 +311,14 @@ public class DeviceForm : Form
 {
   private ListBox messageListBox;
   private TPCANHandle canHandle;
+  private int messageCount = 0;
+  private SynchronizationContext synchronizationContext;
 
   public DeviceForm(TPCANHandle handle)
   {
     canHandle = handle;
     InitializeComponents();
+    synchronizationContext = SynchronizationContext.Current;
   }
 
   private void InitializeComponents()
@@ -332,6 +335,12 @@ public class DeviceForm : Form
   {
     if (this.IsHandleCreated && !this.IsDisposed)
     {
+      synchronizationContext.Post(new SendOrPostCallback(o =>
+      {
+        messageCount++;
+        this.Text = $"PCAN Device {canHandle} Messages ({messageCount})";
+      }), null);
+
       string frameType = (msg.MSGTYPE & TPCANMessageType.PCAN_MESSAGE_EXTENDED) == TPCANMessageType.PCAN_MESSAGE_EXTENDED ? "Extended" : "Standard";
       string message = $"ID: {msg.ID:X} ({frameType}) Data: {BitConverter.ToString(msg.DATA, 0, msg.LEN)}";
       try
