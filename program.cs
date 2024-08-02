@@ -18,6 +18,7 @@ public class MainForm : Form
   private CancellationTokenSource cancellationTokenSource;
   private ManagementEventWatcher insertWatcher;
   private ManagementEventWatcher removeWatcher;
+  private DeviceForm deviceForm;
 
   public MainForm()
   {
@@ -159,6 +160,11 @@ public class MainForm : Form
     if (selectedCanHandle != 0 && PCANBasic.Uninitialize(selectedCanHandle) == TPCANStatus.PCAN_ERROR_OK)
     {
       MessageBox.Show($"Uninitialized {selectedCanHandle}");
+      if (deviceForm != null && !deviceForm.IsDisposed)
+      {
+        deviceForm.Close();
+        deviceForm = null;
+      }
     }
     else
     {
@@ -168,7 +174,7 @@ public class MainForm : Form
 
   private void StartDeviceMonitoring(TPCANHandle canHandle, CancellationToken token)
   {
-    var deviceForm = new DeviceForm(canHandle);
+    deviceForm = new DeviceForm(canHandle);
     deviceForm.Show();
 
     Task.Run(() =>
