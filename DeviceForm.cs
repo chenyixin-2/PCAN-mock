@@ -1,10 +1,7 @@
 using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Management;
 using Peak.Can.Basic;
+using System.Threading;
 using Peak.Can.Basic.BackwardCompatibility;
 using TPCANHandle = System.UInt16;
 

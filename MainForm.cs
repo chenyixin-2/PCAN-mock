@@ -6,7 +6,9 @@ using System.Windows.Forms;
 using System.Management;
 using Peak.Can.Basic;
 using Peak.Can.Basic.BackwardCompatibility;
+using System.Collections.Generic;
 using TPCANHandle = System.UInt16;
+
 public class MainForm : Form
 {
   private ComboBox deviceComboBox;
@@ -18,9 +20,12 @@ public class MainForm : Form
   private ManagementEventWatcher insertWatcher;
   private ManagementEventWatcher removeWatcher;
   private DeviceForm deviceForm;
+  private AppConfig config;
 
   public MainForm()
   {
+    config = AppConfig.Load();
+
     InitializeComponents();
     LoadAvailableDevices();
     LoadBaudrates();
@@ -35,6 +40,7 @@ public class MainForm : Form
     this.stopButton = new Button { Text = "Stop", Dock = DockStyle.Fill };
     this.startButton.Click += StartButton_Click;
     this.stopButton.Click += StopButton_Click;
+    this.deviceComboBox.SelectedIndexChanged += DeviceComboBox_SelectedIndexChanged;
 
     var layout = new TableLayoutPanel
     {
@@ -89,6 +95,15 @@ public class MainForm : Form
       {
         deviceComboBox.SelectedIndex = 0;
       }
+
+      LoadDeviceBaudrate();
+
+      // 记忆之前的波特率设置
+      if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice &&
+          config.DeviceBaudRates.TryGetValue(selectedDevice.DeviceId, out var baudrate))
+      {
+        baudrateComboBox.SelectedItem = baudrateComboBox.Items.Cast<ComboBoxItem>().FirstOrDefault(item => item.BaudrateValue == baudrate);
+      }
     }
     else
     {
@@ -137,6 +152,10 @@ public class MainForm : Form
         MessageBox.Show($"Initialized {selectedDeviceId} with baudrate {selectedBaudrate.Name}");
         cancellationTokenSource = new CancellationTokenSource();
         StartDeviceMonitoring(selectedCanHandle, cancellationTokenSource.Token);
+
+        // 保存配置
+        config.DeviceBaudRates[selectedDeviceId] = selectedBaudrateValue;
+        config.Save();
       }
       else
       {
@@ -149,6 +168,25 @@ public class MainForm : Form
     }
   }
 
+  private void DeviceComboBox_SelectedIndexChanged(object sender, EventArgs e)
+  {
+    LoadDeviceBaudrate();
+  }
+
+  private void LoadDeviceBaudrate()
+  {
+    if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice &&
+        config.DeviceBaudRates.TryGetValue(selectedDevice.DeviceId, out var baudrate))
+    {
+      baudrateComboBox.SelectedItem = baudrateComboBox.Items
+          .Cast<ComboBoxItem>()
+          .FirstOrDefault(item => item.BaudrateValue == baudrate);
+    }
+    else
+    {
+      baudrateComboBox.SelectedIndex = 1; // Default to 500 kBit/s if no previous setting found
+    }
+  }
   private void StopButton_Click(object sender, EventArgs e)
   {
     if (cancellationTokenSource != null)
@@ -273,6 +311,14 @@ public class MainForm : Form
     base.OnFormClosing(e);
   }
 
+  [STAThread]
+  public static void Main()
+  {
+    Application.EnableVisualStyles();
+    Application.SetCompatibleTextRenderingDefault(false);
+    Application.Run(new MainForm());
+  }
+
   private class ComboBoxItem
   {
     public string Name { get; }
@@ -295,13 +341,5 @@ public class MainForm : Form
     {
       return Name;
     }
-  }
-
-  [STAThread]
-  public static void Main()
-  {
-    Application.EnableVisualStyles();
-    Application.SetCompatibleTextRenderingDefault(false);
-    Application.Run(new MainForm());
   }
 }
