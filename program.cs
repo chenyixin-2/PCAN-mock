@@ -258,6 +258,19 @@ public class MainForm : Form
   {
     insertWatcher.Stop();
     removeWatcher.Stop();
+
+    // 卸载所有 PCAN 设备
+    var handles = new TPCANHandle[]
+    {
+            PCANBasic.PCAN_USBBUS1, PCANBasic.PCAN_USBBUS2, PCANBasic.PCAN_USBBUS3,
+            PCANBasic.PCAN_USBBUS4, PCANBasic.PCAN_USBBUS5, PCANBasic.PCAN_USBBUS6,
+            PCANBasic.PCAN_USBBUS7, PCANBasic.PCAN_USBBUS8
+    };
+    foreach (var handle in handles)
+    {
+      PCANBasic.Uninitialize(handle);
+    }
+
     base.OnFormClosing(e);
   }
 
@@ -337,5 +350,12 @@ public class DeviceForm : Form
         // Handle the case when the form is already disposed
       }
     }
+  }
+
+  protected override void OnFormClosing(FormClosingEventArgs e)
+  {
+    // 卸载当前的 PCAN 设备
+    PCANBasic.Uninitialize(canHandle);
+    base.OnFormClosing(e);
   }
 }
