@@ -15,16 +15,17 @@ public class MainForm : Form
   private ComboBox baudrateComboBox;
   private Button startButton;
   private Button stopButton;
-  private TPCANHandle selectedCanHandle;
-  private CancellationTokenSource cancellationTokenSource;
+  private Dictionary<TPCANHandle, CancellationTokenSource> activeDevices;
+  private Dictionary<TPCANHandle, DeviceForm> deviceForms;
   private ManagementEventWatcher insertWatcher;
   private ManagementEventWatcher removeWatcher;
-  private DeviceForm deviceForm;
   private AppConfig config;
 
   public MainForm()
   {
     config = AppConfig.Load();
+    activeDevices = new Dictionary<TPCANHandle, CancellationTokenSource>();
+    deviceForms = new Dictionary<TPCANHandle, DeviceForm>();
 
     InitializeComponents();
     LoadAvailableDevices();
@@ -67,6 +68,8 @@ public class MainForm : Form
     this.Text = "PCAN USB Selector";
     this.ClientSize = new System.Drawing.Size(450, 80);
     this.MinimumSize = new System.Drawing.Size(470, 120);  // 设置窗体的最小尺寸
+
+    // this.FormClosing += MainForm_FormClosing;
   }
 
   private void LoadAvailableDevices()
@@ -128,13 +131,13 @@ public class MainForm : Form
   {
     if (deviceComboBox.Items.Count == 0 || deviceComboBox.SelectedIndex < 0)
     {
-      MessageBox.Show("No devices available.");
+      ShowCopyableMessageBox("No devices available.");
       return;
     }
 
     if (baudrateComboBox.Items.Count == 0 || baudrateComboBox.SelectedIndex < 0)
     {
-      MessageBox.Show("Please select a baudrate.");
+      ShowCopyableMessageBox("Please select a baudrate.");
       return;
     }
 
@@ -143,13 +146,14 @@ public class MainForm : Form
       string selectedDeviceId = selectedDevice.DeviceId;
       TPCANBaudrate selectedBaudrateValue = selectedBaudrate.BaudrateValue;
 
-      selectedCanHandle = GetCanHandleFromDeviceId(selectedDeviceId);
+      TPCANHandle canHandle = GetCanHandleFromDeviceId(selectedDeviceId);
 
-      if (PCANBasic.Initialize(selectedCanHandle, selectedBaudrateValue) == TPCANStatus.PCAN_ERROR_OK)
+      if (PCANBasic.Initialize(canHandle, selectedBaudrateValue) == TPCANStatus.PCAN_ERROR_OK)
       {
-        MessageBox.Show($"Initialized {selectedDeviceId} with baudrate {selectedBaudrate.Name}");
-        cancellationTokenSource = new CancellationTokenSource();
-        StartDeviceMonitoring(selectedCanHandle, cancellationTokenSource.Token);
+        ShowCopyableMessageBox($"Initialized {selectedDeviceId} with baudrate {selectedBaudrate.Name}");
+        CancellationTokenSource cts = new CancellationTokenSource();
+        activeDevices[canHandle] = cts;
+        StartDeviceMonitoring(canHandle, cts.Token);
 
         // 保存配置
         config.DeviceBaudRates[selectedDeviceId] = selectedBaudrateValue;
@@ -157,40 +161,56 @@ public class MainForm : Form
       }
       else
       {
-        MessageBox.Show("Failed to initialize PCAN channel.");
+        ShowCopyableMessageBox("Failed to initialize PCAN channel.");
       }
     }
     else
     {
-      MessageBox.Show("Please select a device and baudrate.");
+      ShowCopyableMessageBox("Please select a device and baudrate.");
     }
   }
 
   private void StopButton_Click(object sender, EventArgs e)
   {
-    if (cancellationTokenSource != null)
+    if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice)
     {
-      cancellationTokenSource.Cancel();
-    }
+      string selectedDeviceId = selectedDevice.DeviceId;
+      TPCANHandle canHandle = GetCanHandleFromDeviceId(selectedDeviceId);
 
-    if (selectedCanHandle != 0 && PCANBasic.Uninitialize(selectedCanHandle) == TPCANStatus.PCAN_ERROR_OK)
-    {
-      MessageBox.Show($"Uninitialized {selectedCanHandle}");
-      if (deviceForm != null && !deviceForm.IsDisposed)
+      if (activeDevices.ContainsKey(canHandle))
       {
-        deviceForm.Close();
-        deviceForm = null;
+        activeDevices[canHandle].Cancel();
+        activeDevices.Remove(canHandle);
+
+        if (PCANBasic.Uninitialize(canHandle) == TPCANStatus.PCAN_ERROR_OK)
+        {
+          ShowCopyableMessageBox($"Uninitialized {canHandle}");
+          if (deviceForms.ContainsKey(canHandle) && deviceForms[canHandle] != null && !deviceForms[canHandle].IsDisposed)
+          {
+            deviceForms[canHandle].Close();
+            deviceForms.Remove(canHandle);
+          }
+        }
+        else
+        {
+          ShowCopyableMessageBox("Failed to uninitialize PCAN channel.");
+        }
+      }
+      else
+      {
+        ShowCopyableMessageBox("Device not active.");
       }
     }
     else
     {
-      MessageBox.Show("Failed to uninitialize PCAN channel.");
+      ShowCopyableMessageBox("Please select a device.");
     }
   }
 
   private void StartDeviceMonitoring(TPCANHandle canHandle, CancellationToken token)
   {
-    deviceForm = new DeviceForm(canHandle);
+    var deviceForm = new DeviceForm(canHandle);
+    deviceForms[canHandle] = deviceForm;
     deviceForm.Show();
 
     Task.Run(() =>
@@ -251,9 +271,19 @@ public class MainForm : Form
 
   private TPCANHandle GetCanHandleFromDeviceId(string deviceId)
   {
-    // Placeholder for logic to map device instance ID to PCAN handle.
-    // This mapping needs to be defined based on specific device information.
-    return PCANBasic.PCAN_USBBUS1; // Default for example purposes
+    // 通过设备ID确定PCAN Handle，这里假设设备ID中包含的最后一位数字可以映射到PCAN handle
+    // 具体映射规则需根据实际设备情况调整
+    if (deviceId.EndsWith("1")) return PCANBasic.PCAN_USBBUS1;
+    if (deviceId.EndsWith("2")) return PCANBasic.PCAN_USBBUS2;
+    if (deviceId.EndsWith("3")) return PCANBasic.PCAN_USBBUS3;
+    if (deviceId.EndsWith("4")) return PCANBasic.PCAN_USBBUS4;
+    if (deviceId.EndsWith("5")) return PCANBasic.PCAN_USBBUS5;
+    if (deviceId.EndsWith("6")) return PCANBasic.PCAN_USBBUS6;
+    if (deviceId.EndsWith("7")) return PCANBasic.PCAN_USBBUS7;
+    if (deviceId.EndsWith("8")) return PCANBasic.PCAN_USBBUS8;
+
+    // 默认返回第一个
+    return PCANBasic.PCAN_USBBUS1;
   }
 
   private void InitializeDeviceWatchers()
@@ -285,18 +315,39 @@ public class MainForm : Form
     removeWatcher.Stop();
 
     // 卸载所有 PCAN 设备
-    var handles = new TPCANHandle[]
-    {
-            PCANBasic.PCAN_USBBUS1, PCANBasic.PCAN_USBBUS2, PCANBasic.PCAN_USBBUS3,
-            PCANBasic.PCAN_USBBUS4, PCANBasic.PCAN_USBBUS5, PCANBasic.PCAN_USBBUS6,
-            PCANBasic.PCAN_USBBUS7, PCANBasic.PCAN_USBBUS8
-    };
-    foreach (var handle in handles)
+    foreach (var handle in activeDevices.Keys)
     {
       PCANBasic.Uninitialize(handle);
     }
 
     base.OnFormClosing(e);
+  }
+
+  private void ShowCopyableMessageBox(string message)
+  {
+    var form = new Form()
+    {
+      Width = 400,
+      Height = 200,
+      Text = "Message"
+    };
+
+    var textBox = new TextBox()
+    {
+      Text = message,
+      Dock = DockStyle.Top,
+      Multiline = true,
+      ReadOnly = true,
+      Width = 380,
+      Height = 150
+    };
+
+    var okButton = new Button() { Text = "OK", Dock = DockStyle.Bottom };
+    okButton.Click += (sender, e) => form.Close();
+
+    form.Controls.Add(textBox);
+    form.Controls.Add(okButton);
+    form.ShowDialog();
   }
 
   [STAThread]
