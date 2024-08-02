@@ -16,12 +16,15 @@ public class MainForm : Form
     private Button stopButton;
     private TPCANHandle selectedCanHandle;
     private CancellationTokenSource cancellationTokenSource;
+    private ManagementEventWatcher insertWatcher;
+    private ManagementEventWatcher removeWatcher;
 
     public MainForm()
     {
         InitializeComponents();
         LoadAvailableDevices();
         LoadBaudrates();
+        InitializeDeviceWatchers();
     }
 
     private void InitializeComponents()
@@ -62,6 +65,7 @@ public class MainForm : Form
 
     private void LoadAvailableDevices()
     {
+        deviceComboBox.Items.Clear();
         var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_PnPEntity WHERE Description LIKE 'PCAN%'");
         foreach (var device in searcher.Get())
         {
@@ -202,6 +206,27 @@ public class MainForm : Form
         // Placeholder for logic to map device instance ID to PCAN handle.
         // This mapping needs to be defined based on specific device information.
         return PCANBasic.PCAN_USBBUS1; // Default for example purposes
+    }
+
+    private void InitializeDeviceWatchers()
+    {
+        WqlEventQuery insertQuery = new WqlEventQuery("SELECT * FROM __InstanceCreationEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_PnPEntity' AND TargetInstance.Description LIKE 'PCAN%'");
+        insertWatcher = new ManagementEventWatcher(insertQuery);
+        insertWatcher.EventArrived += (s, e) => { LoadAvailableDevices(); };
+
+        WqlEventQuery removeQuery = new WqlEventQuery("SELECT * FROM __InstanceDeletionEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_PnPEntity' AND TargetInstance.Description LIKE 'PCAN%'");
+        removeWatcher = new ManagementEventWatcher(removeQuery);
+        removeWatcher.EventArrived += (s, e) => { LoadAvailableDevices(); };
+
+        insertWatcher.Start();
+        removeWatcher.Start();
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        insertWatcher.Stop();
+        removeWatcher.Stop();
+        base.OnFormClosing(e);
     }
 
     [STAThread]
