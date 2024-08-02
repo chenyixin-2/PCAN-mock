@@ -35,12 +35,12 @@ public class MainForm : Form
   private void InitializeComponents()
   {
     this.deviceComboBox = new ComboBox { Dock = DockStyle.Fill };
+    this.deviceComboBox.SelectedIndexChanged += DeviceComboBox_SelectedIndexChanged;
     this.baudrateComboBox = new ComboBox { Dock = DockStyle.Fill };
     this.startButton = new Button { Text = "Start", Dock = DockStyle.Fill };
     this.stopButton = new Button { Text = "Stop", Dock = DockStyle.Fill };
     this.startButton.Click += StartButton_Click;
     this.stopButton.Click += StopButton_Click;
-    this.deviceComboBox.SelectedIndexChanged += DeviceComboBox_SelectedIndexChanged;
 
     var layout = new TableLayoutPanel
     {
@@ -95,8 +95,6 @@ public class MainForm : Form
       {
         deviceComboBox.SelectedIndex = 0;
       }
-
-      LoadDeviceBaudrate();
 
       // 记忆之前的波特率设置
       if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice &&
@@ -168,25 +166,6 @@ public class MainForm : Form
     }
   }
 
-  private void DeviceComboBox_SelectedIndexChanged(object sender, EventArgs e)
-  {
-    LoadDeviceBaudrate();
-  }
-
-  private void LoadDeviceBaudrate()
-  {
-    if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice &&
-        config.DeviceBaudRates.TryGetValue(selectedDevice.DeviceId, out var baudrate))
-    {
-      baudrateComboBox.SelectedItem = baudrateComboBox.Items
-          .Cast<ComboBoxItem>()
-          .FirstOrDefault(item => item.BaudrateValue == baudrate);
-    }
-    else
-    {
-      baudrateComboBox.SelectedIndex = 1; // Default to 500 kBit/s if no previous setting found
-    }
-  }
   private void StopButton_Click(object sender, EventArgs e)
   {
     if (cancellationTokenSource != null)
@@ -289,6 +268,15 @@ public class MainForm : Form
 
     insertWatcher.Start();
     removeWatcher.Start();
+  }
+
+  private void DeviceComboBox_SelectedIndexChanged(object sender, EventArgs e)
+  {
+    if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice &&
+        config.DeviceBaudRates.TryGetValue(selectedDevice.DeviceId, out var baudrate))
+    {
+      baudrateComboBox.SelectedItem = baudrateComboBox.Items.Cast<ComboBoxItem>().FirstOrDefault(item => item.BaudrateValue == baudrate);
+    }
   }
 
   protected override void OnFormClosing(FormClosingEventArgs e)
