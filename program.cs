@@ -65,7 +65,9 @@ public class MainForm : Form
 
   private void LoadAvailableDevices()
   {
+    string previouslySelectedDevice = deviceComboBox.SelectedItem?.ToString();
     deviceComboBox.Items.Clear();
+
     var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_PnPEntity WHERE Description LIKE 'PCAN%'");
     foreach (var device in searcher.Get())
     {
@@ -78,11 +80,19 @@ public class MainForm : Form
 
     if (deviceComboBox.Items.Count > 0)
     {
-      deviceComboBox.SelectedIndex = 0;
+      int index = deviceComboBox.FindStringExact(previouslySelectedDevice);
+      if (index != ListBox.NoMatches)
+      {
+        deviceComboBox.SelectedIndex = index;
+      }
+      else
+      {
+        deviceComboBox.SelectedIndex = 0;
+      }
     }
     else
     {
-      MessageBox.Show("No PCAN devices found.");
+      deviceComboBox.SelectedIndex = -1; // Clear selection if no items are available
     }
   }
 
@@ -103,6 +113,18 @@ public class MainForm : Form
 
   private void StartButton_Click(object sender, EventArgs e)
   {
+    if (deviceComboBox.Items.Count == 0 || deviceComboBox.SelectedIndex < 0)
+    {
+      MessageBox.Show("No devices available.");
+      return;
+    }
+
+    if (baudrateComboBox.Items.Count == 0 || baudrateComboBox.SelectedIndex < 0)
+    {
+      MessageBox.Show("Please select a baudrate.");
+      return;
+    }
+
     if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice && baudrateComboBox.SelectedItem is ComboBoxItem selectedBaudrate)
     {
       string selectedDeviceId = selectedDevice.DeviceId;
@@ -121,6 +143,10 @@ public class MainForm : Form
         MessageBox.Show("Failed to initialize PCAN channel.");
       }
     }
+    else
+    {
+      MessageBox.Show("Please select a device and baudrate.");
+    }
   }
 
   private void StopButton_Click(object sender, EventArgs e)
@@ -130,7 +156,7 @@ public class MainForm : Form
       cancellationTokenSource.Cancel();
     }
 
-    if (PCANBasic.Uninitialize(selectedCanHandle) == TPCANStatus.PCAN_ERROR_OK)
+    if (selectedCanHandle != 0 && PCANBasic.Uninitialize(selectedCanHandle) == TPCANStatus.PCAN_ERROR_OK)
     {
       MessageBox.Show($"Uninitialized {selectedCanHandle}");
     }
@@ -212,11 +238,11 @@ public class MainForm : Form
   {
     WqlEventQuery insertQuery = new WqlEventQuery("SELECT * FROM __InstanceCreationEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_PnPEntity' AND TargetInstance.Description LIKE 'PCAN%'");
     insertWatcher = new ManagementEventWatcher(insertQuery);
-    insertWatcher.EventArrived += (s, e) => { LoadAvailableDevices(); };
+    insertWatcher.EventArrived += (s, e) => { Invoke(new Action(() => LoadAvailableDevices())); };
 
     WqlEventQuery removeQuery = new WqlEventQuery("SELECT * FROM __InstanceDeletionEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_PnPEntity' AND TargetInstance.Description LIKE 'PCAN%'");
     removeWatcher = new ManagementEventWatcher(removeQuery);
-    removeWatcher.EventArrived += (s, e) => { LoadAvailableDevices(); };
+    removeWatcher.EventArrived += (s, e) => { Invoke(new Action(() => LoadAvailableDevices())); };
 
     insertWatcher.Start();
     removeWatcher.Start();
