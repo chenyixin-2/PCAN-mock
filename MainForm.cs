@@ -1,12 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Management;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Management;
 using Peak.Can.Basic;
 using Peak.Can.Basic.BackwardCompatibility;
-using System.Collections.Generic;
 using TPCANHandle = System.UInt16;
 
 public class MainForm : Form
@@ -15,6 +15,7 @@ public class MainForm : Form
   private ComboBox baudrateComboBox;
   private Button startButton;
   private Button stopButton;
+  private Dictionary<string, TPCANHandle> deviceHandleMap;
   private Dictionary<TPCANHandle, CancellationTokenSource> activeDevices;
   private Dictionary<TPCANHandle, DeviceForm> deviceForms;
   private ManagementEventWatcher insertWatcher;
@@ -24,6 +25,7 @@ public class MainForm : Form
   public MainForm()
   {
     config = AppConfig.Load();
+    deviceHandleMap = new Dictionary<string, TPCANHandle>();
     activeDevices = new Dictionary<TPCANHandle, CancellationTokenSource>();
     deviceForms = new Dictionary<TPCANHandle, DeviceForm>();
 
@@ -67,9 +69,9 @@ public class MainForm : Form
 
     this.Text = "PCAN USB Selector";
     this.ClientSize = new System.Drawing.Size(450, 80);
-    this.MinimumSize = new System.Drawing.Size(470, 120);  // 设置窗体的最小尺寸
+    this.MinimumSize = new System.Drawing.Size(470, 120); // 设置窗体的最小尺寸
 
-    // this.FormClosing += MainForm_FormClosing;
+    this.FormClosing += MainForm_FormClosing;
   }
 
   private void LoadAvailableDevices()
@@ -77,7 +79,9 @@ public class MainForm : Form
     string previouslySelectedDevice = deviceComboBox.SelectedItem?.ToString();
     deviceComboBox.Items.Clear();
 
-    var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_PnPEntity WHERE Description LIKE 'PCAN%'");
+    var searcher = new ManagementObjectSearcher(
+        "SELECT * FROM Win32_PnPEntity WHERE Description LIKE 'PCAN%'"
+    );
     foreach (var device in searcher.Get())
     {
       var deviceId = device["DeviceID"]?.ToString();
@@ -100,10 +104,14 @@ public class MainForm : Form
       }
 
       // 记忆之前的波特率设置
-      if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice &&
-          config.DeviceBaudRates.TryGetValue(selectedDevice.DeviceId, out var baudrate))
+      if (
+          deviceComboBox.SelectedItem is ComboBoxItem selectedDevice
+          && config.DeviceBaudRates.TryGetValue(selectedDevice.DeviceId, out var baudrate)
+      )
       {
-        baudrateComboBox.SelectedItem = baudrateComboBox.Items.Cast<ComboBoxItem>().FirstOrDefault(item => item.BaudrateValue == baudrate);
+        baudrateComboBox.SelectedItem = baudrateComboBox
+            .Items.Cast<ComboBoxItem>()
+            .FirstOrDefault(item => item.BaudrateValue == baudrate);
       }
     }
     else
@@ -141,16 +149,31 @@ public class MainForm : Form
       return;
     }
 
-    if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice && baudrateComboBox.SelectedItem is ComboBoxItem selectedBaudrate)
+    if (
+        deviceComboBox.SelectedItem is ComboBoxItem selectedDevice
+        && baudrateComboBox.SelectedItem is ComboBoxItem selectedBaudrate
+    )
     {
       string selectedDeviceId = selectedDevice.DeviceId;
       TPCANBaudrate selectedBaudrateValue = selectedBaudrate.BaudrateValue;
 
       TPCANHandle canHandle = GetCanHandleFromDeviceId(selectedDeviceId);
 
+      if (!deviceHandleMap.ContainsKey(selectedDeviceId))
+      {
+        canHandle = GetNextAvailableHandle();
+        deviceHandleMap[selectedDeviceId] = canHandle;
+      }
+      else
+      {
+        canHandle = deviceHandleMap[selectedDeviceId];
+      }
+
       if (PCANBasic.Initialize(canHandle, selectedBaudrateValue) == TPCANStatus.PCAN_ERROR_OK)
       {
-        ShowCopyableMessageBox($"Initialized {selectedDeviceId} with baudrate {selectedBaudrate.Name}");
+        ShowCopyableMessageBox(
+            $"Initialized {selectedDeviceId} with baudrate {selectedBaudrate.Name}"
+        );
         CancellationTokenSource cts = new CancellationTokenSource();
         activeDevices[canHandle] = cts;
         StartDeviceMonitoring(canHandle, cts.Token);
@@ -175,30 +198,43 @@ public class MainForm : Form
     if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice)
     {
       string selectedDeviceId = selectedDevice.DeviceId;
-      TPCANHandle canHandle = GetCanHandleFromDeviceId(selectedDeviceId);
-
-      if (activeDevices.ContainsKey(canHandle))
+      if (deviceHandleMap.ContainsKey(selectedDeviceId))
       {
-        activeDevices[canHandle].Cancel();
-        activeDevices.Remove(canHandle);
+        TPCANHandle canHandle = deviceHandleMap[selectedDeviceId];
 
-        if (PCANBasic.Uninitialize(canHandle) == TPCANStatus.PCAN_ERROR_OK)
+        if (activeDevices.ContainsKey(canHandle))
         {
-          ShowCopyableMessageBox($"Uninitialized {canHandle}");
-          if (deviceForms.ContainsKey(canHandle) && deviceForms[canHandle] != null && !deviceForms[canHandle].IsDisposed)
+          activeDevices[canHandle].Cancel();
+          activeDevices.Remove(canHandle);
+
+          if (PCANBasic.Uninitialize(canHandle) == TPCANStatus.PCAN_ERROR_OK)
           {
-            deviceForms[canHandle].Close();
-            deviceForms.Remove(canHandle);
+            ShowCopyableMessageBox($"Uninitialized {canHandle}");
+            if (
+                deviceForms.ContainsKey(canHandle)
+                && deviceForms[canHandle] != null
+                && !deviceForms[canHandle].IsDisposed
+            )
+            {
+              deviceForms[canHandle].Close();
+              deviceForms.Remove(canHandle);
+            }
+
+            deviceHandleMap.Remove(selectedDeviceId); // 移除设备映射
+          }
+          else
+          {
+            ShowCopyableMessageBox("Failed to uninitialize PCAN channel.");
           }
         }
         else
         {
-          ShowCopyableMessageBox("Failed to uninitialize PCAN channel.");
+          ShowCopyableMessageBox("Device not active.");
         }
       }
       else
       {
-        ShowCopyableMessageBox("Device not active.");
+        ShowCopyableMessageBox("Device handle not found.");
       }
     }
     else
@@ -213,39 +249,75 @@ public class MainForm : Form
     deviceForms[canHandle] = deviceForm;
     deviceForm.Show();
 
-    Task.Run(() =>
-    {
-      var random = new Random();
-      while (!token.IsCancellationRequested)
-      {
-        TPCANMsg canMsg;
-        TPCANTimestamp canTimestamp;
-
-        if (PCANBasic.Read(canHandle, out canMsg, out canTimestamp) == TPCANStatus.PCAN_ERROR_OK)
+    Task.Run(
+        () =>
         {
-          deviceForm.DisplayMessage(canMsg);
-
-          if (canMsg.ID == 0x04904000)
+          var random = new Random();
+          while (!token.IsCancellationRequested)
           {
-            SendCanMessage(canHandle, 0x18008040, new byte[] { 0x01, 0x40, 0x41, 0x4A, 0x0D, 0x17, 0xFF, 0xC0 }, canMsg.MSGTYPE);
-            SendCanMessage(canHandle, 0x18018040, new byte[] { 0x0A, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00 }, canMsg.MSGTYPE);
-            SendCanMessage(canHandle, 0x18068040, new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, canMsg.MSGTYPE);
-            SendCanMessage(canHandle, 0x18078040, new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, canMsg.MSGTYPE);
-            SendCanMessage(canHandle, 0x18088040, new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, canMsg.MSGTYPE);
-          }
-          else
-          {
-            byte[] randomData = new byte[8];
-            random.NextBytes(randomData);
+            TPCANMsg canMsg;
+            TPCANTimestamp canTimestamp;
 
-            SendCanMessage(canHandle, canMsg.ID, randomData, canMsg.MSGTYPE);
+            if (
+                    PCANBasic.Read(canHandle, out canMsg, out canTimestamp)
+                    == TPCANStatus.PCAN_ERROR_OK
+                )
+            {
+              deviceForm.DisplayMessage(canMsg);
+
+              if (canMsg.ID == 0x04904000)
+              {
+                SendCanMessage(
+                        canHandle,
+                        0x18008040,
+                        new byte[] { 0x01, 0x40, 0x41, 0x4A, 0x0D, 0x17, 0xFF, 0xC0 },
+                        canMsg.MSGTYPE
+                    );
+                SendCanMessage(
+                        canHandle,
+                        0x18018040,
+                        new byte[] { 0x0A, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00 },
+                        canMsg.MSGTYPE
+                    );
+                SendCanMessage(
+                        canHandle,
+                        0x18068040,
+                        new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
+                        canMsg.MSGTYPE
+                    );
+                SendCanMessage(
+                        canHandle,
+                        0x18078040,
+                        new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
+                        canMsg.MSGTYPE
+                    );
+                SendCanMessage(
+                        canHandle,
+                        0x18088040,
+                        new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
+                        canMsg.MSGTYPE
+                    );
+              }
+              else
+              {
+                byte[] randomData = new byte[8];
+                random.NextBytes(randomData);
+
+                SendCanMessage(canHandle, canMsg.ID, randomData, canMsg.MSGTYPE);
+              }
+            }
           }
-        }
-      }
-    }, token);
+        },
+        token
+    );
   }
 
-  private void SendCanMessage(TPCANHandle canHandle, uint id, byte[] data, TPCANMessageType msgType)
+  private void SendCanMessage(
+      TPCANHandle canHandle,
+      uint id,
+      byte[] data,
+      TPCANMessageType msgType
+  )
   {
     if ((id & 0x1FFF00FF) == 0x18A200F6)
     {
@@ -258,9 +330,11 @@ public class MainForm : Form
       ID = id,
       LEN = (byte)data.Length,
       DATA = data,
-      MSGTYPE = (msgType & TPCANMessageType.PCAN_MESSAGE_EXTENDED) == TPCANMessageType.PCAN_MESSAGE_EXTENDED
-                  ? TPCANMessageType.PCAN_MESSAGE_EXTENDED
-                  : TPCANMessageType.PCAN_MESSAGE_STANDARD
+      MSGTYPE =
+            (msgType & TPCANMessageType.PCAN_MESSAGE_EXTENDED)
+            == TPCANMessageType.PCAN_MESSAGE_EXTENDED
+                ? TPCANMessageType.PCAN_MESSAGE_EXTENDED
+                : TPCANMessageType.PCAN_MESSAGE_STANDARD
     };
 
     if (PCANBasic.Write(canHandle, ref canMsg) != TPCANStatus.PCAN_ERROR_OK)
@@ -271,30 +345,67 @@ public class MainForm : Form
 
   private TPCANHandle GetCanHandleFromDeviceId(string deviceId)
   {
-    // 通过设备ID确定PCAN Handle，这里假设设备ID中包含的最后一位数字可以映射到PCAN handle
-    // 具体映射规则需根据实际设备情况调整
-    if (deviceId.EndsWith("1")) return PCANBasic.PCAN_USBBUS1;
-    if (deviceId.EndsWith("2")) return PCANBasic.PCAN_USBBUS2;
-    if (deviceId.EndsWith("3")) return PCANBasic.PCAN_USBBUS3;
-    if (deviceId.EndsWith("4")) return PCANBasic.PCAN_USBBUS4;
-    if (deviceId.EndsWith("5")) return PCANBasic.PCAN_USBBUS5;
-    if (deviceId.EndsWith("6")) return PCANBasic.PCAN_USBBUS6;
-    if (deviceId.EndsWith("7")) return PCANBasic.PCAN_USBBUS7;
-    if (deviceId.EndsWith("8")) return PCANBasic.PCAN_USBBUS8;
+    if (deviceHandleMap.TryGetValue(deviceId, out var handle))
+    {
+      return handle;
+    }
 
     // 默认返回第一个
     return PCANBasic.PCAN_USBBUS1;
   }
 
+  private TPCANHandle GetNextAvailableHandle()
+  {
+    var availableHandles = new TPCANHandle[]
+    {
+            PCANBasic.PCAN_USBBUS1,
+            PCANBasic.PCAN_USBBUS2,
+            PCANBasic.PCAN_USBBUS3,
+            PCANBasic.PCAN_USBBUS4,
+            PCANBasic.PCAN_USBBUS5,
+            PCANBasic.PCAN_USBBUS6,
+            PCANBasic.PCAN_USBBUS7,
+            PCANBasic.PCAN_USBBUS8,
+            PCANBasic.PCAN_USBBUS9,
+            PCANBasic.PCAN_USBBUS10,
+            PCANBasic.PCAN_USBBUS11,
+            PCANBasic.PCAN_USBBUS12,
+            PCANBasic.PCAN_USBBUS13,
+            PCANBasic.PCAN_USBBUS14,
+            PCANBasic.PCAN_USBBUS15,
+            PCANBasic.PCAN_USBBUS16
+    };
+
+    foreach (var handle in availableHandles)
+    {
+      if (!deviceHandleMap.ContainsValue(handle))
+      {
+        return handle;
+      }
+    }
+
+    throw new InvalidOperationException("No available PCAN handles.");
+  }
+
   private void InitializeDeviceWatchers()
   {
-    WqlEventQuery insertQuery = new WqlEventQuery("SELECT * FROM __InstanceCreationEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_PnPEntity' AND TargetInstance.Description LIKE 'PCAN%'");
+    WqlEventQuery insertQuery = new WqlEventQuery(
+        "SELECT * FROM __InstanceCreationEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_PnPEntity' AND TargetInstance.Description LIKE 'PCAN%'"
+    );
     insertWatcher = new ManagementEventWatcher(insertQuery);
-    insertWatcher.EventArrived += (s, e) => { Invoke(new Action(() => LoadAvailableDevices())); };
+    insertWatcher.EventArrived += (s, e) =>
+    {
+      Invoke(new Action(() => LoadAvailableDevices()));
+    };
 
-    WqlEventQuery removeQuery = new WqlEventQuery("SELECT * FROM __InstanceDeletionEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_PnPEntity' AND TargetInstance.Description LIKE 'PCAN%'");
+    WqlEventQuery removeQuery = new WqlEventQuery(
+        "SELECT * FROM __InstanceDeletionEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_PnPEntity' AND TargetInstance.Description LIKE 'PCAN%'"
+    );
     removeWatcher = new ManagementEventWatcher(removeQuery);
-    removeWatcher.EventArrived += (s, e) => { Invoke(new Action(() => LoadAvailableDevices())); };
+    removeWatcher.EventArrived += (s, e) =>
+    {
+      Invoke(new Action(() => LoadAvailableDevices()));
+    };
 
     insertWatcher.Start();
     removeWatcher.Start();
@@ -302,14 +413,18 @@ public class MainForm : Form
 
   private void DeviceComboBox_SelectedIndexChanged(object sender, EventArgs e)
   {
-    if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice &&
-        config.DeviceBaudRates.TryGetValue(selectedDevice.DeviceId, out var baudrate))
+    if (
+        deviceComboBox.SelectedItem is ComboBoxItem selectedDevice
+        && config.DeviceBaudRates.TryGetValue(selectedDevice.DeviceId, out var baudrate)
+    )
     {
-      baudrateComboBox.SelectedItem = baudrateComboBox.Items.Cast<ComboBoxItem>().FirstOrDefault(item => item.BaudrateValue == baudrate);
+      baudrateComboBox.SelectedItem = baudrateComboBox
+          .Items.Cast<ComboBoxItem>()
+          .FirstOrDefault(item => item.BaudrateValue == baudrate);
     }
   }
 
-  protected override void OnFormClosing(FormClosingEventArgs e)
+  private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
   {
     insertWatcher.Stop();
     removeWatcher.Stop();
@@ -319,8 +434,6 @@ public class MainForm : Form
     {
       PCANBasic.Uninitialize(handle);
     }
-
-    base.OnFormClosing(e);
   }
 
   private void ShowCopyableMessageBox(string message)
