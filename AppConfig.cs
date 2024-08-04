@@ -8,7 +8,8 @@ using TPCANHandle = System.UInt16;
 
 public class AppConfig
 {
-    public Dictionary<string, TPCANBaudrate> DeviceBaudRates { get; set; } = new Dictionary<string, TPCANBaudrate>();
+    public Dictionary<string, TPCANBaudrate> DeviceBaudRates { get; set; } =
+        new Dictionary<string, TPCANBaudrate>();
 
     private static string configFilePath = "appconfig.json";
 
