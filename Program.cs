@@ -352,10 +352,7 @@ public class DeviceForm : Form
     {
         this.messageListBox = new ListBox
         {
-            Left = 10,
-            Top = 10,
-            Width = 460,
-            Height = 240
+            Dock = DockStyle.Fill // 使 ListBox 填满整个窗体
         };
         this.Controls.Add(this.messageListBox);
 
