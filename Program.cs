@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,12 +17,15 @@ public class MainForm : Form
     private TPCANHandle selectedCanHandle;
     private CancellationTokenSource cancellationTokenSource;
     private readonly object lockObj = new object();
+    private Dictionary<TPCANHandle, DeviceForm> activeDeviceForms =
+        new Dictionary<TPCANHandle, DeviceForm>();
 
     public MainForm()
     {
         InitializeComponents();
         LoadAvailableDevices();
         LoadBaudrates();
+        this.FormClosing += MainForm_FormClosing;
     }
 
     private void InitializeComponents()
@@ -156,24 +160,31 @@ public class MainForm : Form
 
     private void StopButton_Click(object sender, EventArgs e)
     {
-        if (cancellationTokenSource != null)
+        if (deviceComboBox.SelectedItem is ComboBoxItem selectedDevice)
         {
-            cancellationTokenSource.Cancel();
-        }
+            TPCANHandle handleToStop = selectedDevice.Value;
 
-        if (PCANBasic.Uninitialize(selectedCanHandle) == TPCANStatus.PCAN_ERROR_OK)
-        {
-            MessageBox.Show($"Uninitialized {selectedCanHandle}");
-        }
-        else
-        {
-            MessageBox.Show("Failed to uninitialize PCAN channel.");
+            if (activeDeviceForms.TryGetValue(handleToStop, out DeviceForm deviceForm))
+            {
+                deviceForm.Close();
+                activeDeviceForms.Remove(handleToStop);
+            }
+
+            if (PCANBasic.Uninitialize(handleToStop) == TPCANStatus.PCAN_ERROR_OK)
+            {
+                MessageBox.Show($"Uninitialized {handleToStop}");
+            }
+            else
+            {
+                MessageBox.Show("Failed to uninitialize PCAN channel.");
+            }
         }
     }
 
     private void StartDeviceMonitoring(TPCANHandle canHandle, CancellationToken token)
     {
         var deviceForm = new DeviceForm(canHandle);
+        activeDeviceForms[canHandle] = deviceForm;
         deviceForm.Show();
 
         Task.Run(
@@ -238,6 +249,15 @@ public class MainForm : Form
             },
             token
         );
+
+        deviceForm.FormClosing += (s, e) =>
+        {
+            if (!token.IsCancellationRequested)
+            {
+                cancellationTokenSource.Cancel();
+            }
+            PCANBasic.Uninitialize(canHandle);
+        };
     }
 
     private void SendCanMessage(
@@ -269,6 +289,17 @@ public class MainForm : Form
         if (PCANBasic.Write(canHandle, ref canMsg) != TPCANStatus.PCAN_ERROR_OK)
         {
             Console.WriteLine("Failed to send CAN message.");
+        }
+    }
+
+    private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+    {
+        foreach (var handle in activeDeviceForms.Keys.ToList())
+        {
+            if (PCANBasic.Uninitialize(handle) != TPCANStatus.PCAN_ERROR_OK)
+            {
+                MessageBox.Show($"Failed to uninitialize PCAN channel {handle}");
+            }
         }
     }
 
@@ -309,11 +340,13 @@ public class DeviceForm : Form
 {
     private ListBox messageListBox;
     private TPCANHandle canHandle;
+    private int messageCount;
 
     public DeviceForm(TPCANHandle handle)
     {
         canHandle = handle;
         InitializeComponents();
+        this.FormClosing += DeviceForm_FormClosing;
     }
 
     private void InitializeComponents()
@@ -327,7 +360,7 @@ public class DeviceForm : Form
         };
         this.Controls.Add(this.messageListBox);
 
-        this.Text = $"PCAN Device {canHandle} Messages";
+        this.Text = $"PCAN Device {canHandle} Messages (0)";
         this.ClientSize = new System.Drawing.Size(480, 260);
     }
 
@@ -351,6 +384,8 @@ public class DeviceForm : Form
                         {
                             messageListBox.Items.Add(message);
                             messageListBox.TopIndex = messageListBox.Items.Count - 1;
+                            messageCount++;
+                            this.Text = $"PCAN Device {canHandle} Messages ({messageCount})";
                         }
                     })
                 );
@@ -359,6 +394,14 @@ public class DeviceForm : Form
             {
                 // Handle the case when the form is already disposed
             }
+        }
+    }
+
+    private void DeviceForm_FormClosing(object sender, FormClosingEventArgs e)
+    {
+        if (PCANBasic.Uninitialize(canHandle) != TPCANStatus.PCAN_ERROR_OK)
+        {
+            MessageBox.Show($"Failed to uninitialize PCAN channel {canHandle}");
         }
     }
 }
