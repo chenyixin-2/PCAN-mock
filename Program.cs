@@ -17,8 +17,7 @@ public class MainForm : Form
     private TPCANHandle selectedCanHandle;
     private CancellationTokenSource cancellationTokenSource;
     private readonly object lockObj = new object();
-    private Dictionary<TPCANHandle, DeviceForm> activeDeviceForms =
-        new Dictionary<TPCANHandle, DeviceForm>();
+    private Dictionary<TPCANHandle, DeviceForm> activeDeviceForms = new Dictionary<TPCANHandle, DeviceForm>();
 
     public MainForm()
     {
@@ -201,7 +200,7 @@ public class MainForm : Form
                         == TPCANStatus.PCAN_ERROR_OK
                     )
                     {
-                        deviceForm.DisplayMessage(canMsg);
+                        deviceForm.DisplayMessage(canMsg, canTimestamp);
 
                         if (canMsg.ID == 0x04904000)
                         {
@@ -364,7 +363,7 @@ public class DeviceForm : Form
         this.ClientSize = new System.Drawing.Size(480, 260);
     }
 
-    public void DisplayMessage(TPCANMsg msg)
+    public void DisplayMessage(TPCANMsg msg, TPCANTimestamp timestamp)
     {
         if (this.IsHandleCreated && !this.IsDisposed)
         {
@@ -373,8 +372,9 @@ public class DeviceForm : Form
                 == TPCANMessageType.PCAN_MESSAGE_EXTENDED
                     ? "Extended"
                     : "Standard";
+            string timestampStr = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}.{timestamp.micros:D3}";
             string message =
-                $"ID: {msg.ID:X} ({frameType}) Data: {BitConverter.ToString(msg.DATA, 0, msg.LEN)}";
+                $"{timestampStr} - ID: {msg.ID:X} ({frameType}) Data: {BitConverter.ToString(msg.DATA, 0, msg.LEN)}";
             try
             {
                 this.Invoke(
