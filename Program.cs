@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Timers;
 using System.Windows.Forms;
 using Peak.Can.Basic;
 using Peak.Can.Basic.BackwardCompatibility;
@@ -17,13 +18,16 @@ public class MainForm : Form
     private TPCANHandle selectedCanHandle;
     private CancellationTokenSource cancellationTokenSource;
     private readonly object lockObj = new object();
-    private Dictionary<TPCANHandle, DeviceForm> activeDeviceForms = new Dictionary<TPCANHandle, DeviceForm>();
+    private Dictionary<TPCANHandle, DeviceForm> activeDeviceForms =
+        new Dictionary<TPCANHandle, DeviceForm>();
+    private System.Timers.Timer deviceCheckTimer;
 
     public MainForm()
     {
         InitializeComponents();
-        LoadAvailableDevices();
         LoadBaudrates();
+        LoadAvailableDevices(); // Initial load
+        SetupDeviceCheckTimer();
         this.FormClosing += MainForm_FormClosing;
     }
 
@@ -67,8 +71,16 @@ public class MainForm : Form
         this.ClientSize = new System.Drawing.Size(450, 80);
     }
 
+    private void SetupDeviceCheckTimer()
+    {
+        deviceCheckTimer = new System.Timers.Timer(5000); // Check every 5 seconds
+        deviceCheckTimer.Elapsed += (sender, e) => LoadAvailableDevices();
+        deviceCheckTimer.Start();
+    }
+
     private void LoadAvailableDevices()
     {
+        var currentHandles = new HashSet<TPCANHandle>();
         TPCANHandle[] handles =
         {
             PCANBasic.PCAN_USBBUS1,
@@ -100,15 +112,27 @@ public class MainForm : Form
 
             if (status == TPCANStatus.PCAN_ERROR_OK)
             {
-                deviceComboBox.Items.Add(new ComboBoxItem($"PCAN Device {handle}", handle));
+                currentHandles.Add(handle);
+                if (!deviceComboBox.Items.OfType<ComboBoxItem>().Any(item => item.Value == handle))
+                {
+                    deviceComboBox.Items.Add(new ComboBoxItem($"PCAN Device {handle}", handle));
+                }
             }
         }
 
-        if (deviceComboBox.Items.Count > 0)
+        foreach (var item in deviceComboBox.Items.OfType<ComboBoxItem>().ToList())
+        {
+            if (!currentHandles.Contains(item.Value))
+            {
+                deviceComboBox.Items.Remove(item);
+            }
+        }
+
+        if (deviceComboBox.Items.Count > 0 && deviceComboBox.SelectedItem == null)
         {
             deviceComboBox.SelectedIndex = 0;
         }
-        else
+        else if (deviceComboBox.Items.Count == 0)
         {
             MessageBox.Show("No PCAN devices found.");
         }
@@ -293,6 +317,7 @@ public class MainForm : Form
 
     private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
     {
+        deviceCheckTimer.Stop();
         foreach (var handle in activeDeviceForms.Keys.ToList())
         {
             if (PCANBasic.Uninitialize(handle) != TPCANStatus.PCAN_ERROR_OK)
